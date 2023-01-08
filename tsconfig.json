@@ -5,12 +5,13 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "lib": ["es2021"]
   },
 
   "references": [
     {
       "path": "./tsconfig.vite-config.json"
     }
-  ]
+  ],
 }

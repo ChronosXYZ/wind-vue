@@ -15,7 +15,7 @@ export class NNTPClient {
 
   constructor(url: string) {
     this.ws = new WebsocketBuilder(url)
-      .onMessage((ins, evt) => {
+      .onMessage((_, evt) => {
         if ((evt.data as string).startsWith("201")) {
           console.debug("skipping welcome message");
         }
@@ -52,7 +52,8 @@ export class NNTPClient {
 
   private async sendCommand(
     command: string,
-    args: string[]
+    args: string[],
+    prepareResponse = false // remove unnecessary things in lines array
   ): Promise<CommandResponse> {
     const cmd = {
       request: { command: command, args: args } as CommandRequest,
@@ -67,43 +68,50 @@ export class NNTPClient {
     }
 
     const result = await cmd.response.promise;
+    if (prepareResponse) {
+      result.lines.shift();
+      result.lines.pop();
+    }
     return result;
   }
 
-  private async getNewsGroupList(): Promise<GroupInfo[]> {
-    const l: GroupInfo[] = [];
+  private completeGroupInfo(obj: Partial<GroupInfo>): GroupInfo {
+    return Object.assign(
+      {
+        name: "",
+        description: "",
+        lowWater: -1,
+        highWater: -1,
+      },
+      obj
+    );
+  }
+
+  public async getNewsGroupList(): Promise<GroupInfo[]> {
     const groupMap: Record<string, Partial<GroupInfo>> = {};
+    const [newsgroupsResponse, activeResponse]: CommandResponse[] =
+      await Promise.all([
+        this.sendCommand("LIST", ["NEWSGROUPS"], true),
+        this.sendCommand("LIST", ["ACTIVE"], true),
+      ]);
 
-    await this.sendCommand("LIST", ["NEWSGROUPS"]).then((value) => {
-      value.lines.shift();
-      value.lines.pop();
-      value.lines.forEach((elem) => {
-        const firstSpace = elem.indexOf(" ");
-        const name = elem.substring(0, firstSpace);
-        groupMap[name] = { description: elem.substring(firstSpace + 1) };
-      });
+    newsgroupsResponse.lines.forEach((val: string) => {
+      const firstSpace = val.indexOf(" ");
+      const name = val.substring(0, firstSpace);
+      groupMap[name] = { description: val.substring(firstSpace + 1) };
     });
 
-    await this.sendCommand("LIST", ["ACTIVE"]).then((value) => {
-      value.lines.shift();
-      value.lines.pop();
-      value.lines.forEach((elem) => {
-        const splitted = elem.split(" ");
-        const [name, high, low] = splitted;
-        groupMap[name].highWater = Number(high);
-        groupMap[name].lowWater = Number(low);
-      });
+    activeResponse.lines.forEach((val: string) => {
+      const splitted = val.split(" ");
+      const [name, high, low]: string[] = splitted;
+      groupMap[name].highWater = Number(high);
+      groupMap[name].lowWater = Number(low);
     });
 
-    Object.keys(groupMap).forEach((key) => {
-      l.push({
-        name: groupMap[key].name!,
-        description: groupMap[key].description!,
-        lowWater: groupMap[key].lowWater!,
-        highWater: groupMap[key].highWater!,
-      });
-    });
+    const result = Object.entries(groupMap).map(([, obj]) =>
+      this.completeGroupInfo(obj)
+    );
 
-    return l;
+    return result;
   }
 }
